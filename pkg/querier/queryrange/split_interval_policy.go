@@ -1,0 +1,88 @@
+package queryrange
+
+import (
+	"time"
+
+	"github.com/grafana/loki/v3/pkg/dataobj/metastore"
+	"github.com/grafana/loki/v3/pkg/logql/syntax"
+	"github.com/grafana/loki/v3/pkg/util/validation"
+)
+
+// SplitIntervalPolicy holds the parts of time splitting that differ between a query that reads
+// chunks and a query that reads data objects.
+type SplitIntervalPolicy interface {
+	// RangeQueryInterval returns the interval that cuts the time range of a metric range request.
+	// It returns 0 when the tenants turn splitting off.
+	RangeQueryInterval(tenantIDs []string, r *LokiRequest) time.Duration
+
+	// InstantQueryInterval returns the interval that cuts the range vector of an instant request.
+	// It returns 0 when the tenants turn splitting off.
+	InstantQueryInterval(tenantIDs []string) time.Duration
+}
+
+// chunkSplitIntervalPolicy is the policy of queries that read chunks.
+type chunkSplitIntervalPolicy struct {
+	limits Limits
+}
+
+func newChunkSplitIntervalPolicy(limits Limits) chunkSplitIntervalPolicy {
+	return chunkSplitIntervalPolicy{limits: limits}
+}
+
+func (p chunkSplitIntervalPolicy) RangeQueryInterval(tenantIDs []string, r *LokiRequest) time.Duration {
+	interval := validation.SmallestPositiveNonZeroDurationPerTenant(tenantIDs, p.limits.QuerySplitDuration)
+	if interval == 0 {
+		return 0
+	}
+
+	// A range vector longer than the interval widens the interval to the range vector. Smaller
+	// splits would read the same data again and again.
+	maxRange, _ := maxRangeVectorAndOffsetDuration(r.Plan.AST)
+	return max(interval, maxRange)
+}
+
+func (p chunkSplitIntervalPolicy) InstantQueryInterval(tenantIDs []string) time.Duration {
+	return validation.SmallestPositiveNonZeroDurationPerTenant(tenantIDs, p.limits.InstantMetricQuerySplitDuration)
+}
+
+// dataObjSplitIntervalPolicy is the policy of queries that read data objects.
+type dataObjSplitIntervalPolicy struct {
+	cfg    Config
+	limits Limits
+}
+
+func newDataObjSplitIntervalPolicy(cfg Config, limits Limits) *dataObjSplitIntervalPolicy {
+	return &dataObjSplitIntervalPolicy{cfg: cfg, limits: limits}
+}
+
+// shouldUse predicts whether a piece of the query that expr describes will prefer data objects,
+// over the request range from start to end. The query-frontend splits a query in time before it
+// shards it, so it cannot yet see the pieces that a querier will run.
+func (p *dataObjSplitIntervalPolicy) shouldUse(tenantIDs []string, expr syntax.Expr, start, end time.Time) bool {
+	return dataObjAnyPrefers(p.cfg, p.limits, tenantIDs, expr, start, end)
+}
+
+func (p *dataObjSplitIntervalPolicy) RangeQueryInterval(tenantIDs []string, r *LokiRequest) time.Duration {
+	interval := validation.SmallestPositiveNonZeroDurationPerTenant(tenantIDs, p.limits.QuerySplitDuration)
+	if interval == 0 {
+		return 0
+	}
+
+	maxRange, _ := maxRangeVectorAndOffsetDuration(r.Plan.AST)
+	return p.alignIntervalToMetastoreWindow(max(interval, maxRange))
+}
+
+func (p *dataObjSplitIntervalPolicy) InstantQueryInterval(tenantIDs []string) time.Duration {
+	interval := validation.SmallestPositiveNonZeroDurationPerTenant(tenantIDs, p.limits.InstantMetricQuerySplitDuration)
+	if interval == 0 {
+		return 0
+	}
+	return p.alignIntervalToMetastoreWindow(interval)
+}
+
+// alignIntervalToMetastoreWindow aligns the interval to the metastore window, by rounding it up.
+func (*dataObjSplitIntervalPolicy) alignIntervalToMetastoreWindow(interval time.Duration) time.Duration {
+	window := metastore.MetastoreWindowSize
+	windows := (max(interval, window) + window - 1) / window
+	return windows * window
+}
