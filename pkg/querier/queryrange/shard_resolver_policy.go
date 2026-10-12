@@ -75,7 +75,7 @@ func (p *dataObjShardingPolicy) PowerOfTwoShards(tenantIDs []string, indexStats 
 	}
 
 	maxBytesPerShard := validation.SmallestPositiveIntPerTenant(tenantIDs, p.limits.DataObjMaxBytesPerShard)
-	return sharding.GuessShardFactor(indexStats.Bytes, uint64(maxBytesPerShard), maxShards)
+	return sharding.GuessShardFactor(indexStats.Bytes, maxBytesPerShard, maxShards)
 }
 
 // BoundedShards merges the shards that the index returns into at most dataObjMaxOverReadFactor

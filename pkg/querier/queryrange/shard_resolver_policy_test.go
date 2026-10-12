@@ -48,7 +48,7 @@ func TestChunkShardingPolicy_PowerOfTwoShards(t *testing.T) {
 	t.Run("ignores the limit of data objects", func(t *testing.T) {
 		limits := bytesPerShardLimits{
 			tsdbBytesPerShard:    map[string]int{"1": maxBytesPerShard},
-			dataObjBytesPerShard: map[string]int{"1": 4 * maxBytesPerShard},
+			dataObjBytesPerShard: map[string]uint64{"1": 4 * maxBytesPerShard},
 		}
 
 		got := newChunkShardingPolicy(limits).PowerOfTwoShards(tenants, stats.Stats{Bytes: bytes}, 0)
@@ -109,7 +109,7 @@ func TestDataObjShardingPolicy_shouldUse(t *testing.T) {
 func TestDataObjShardingPolicy_PowerOfTwoShards(t *testing.T) {
 	const bytes, maxBytesPerShard = 1 << 30, 1 << 20
 	tenants := []string{"1"}
-	limits := bytesPerShardLimits{dataObjBytesPerShard: map[string]int{"1": maxBytesPerShard}}
+	limits := bytesPerShardLimits{dataObjBytesPerShard: map[string]uint64{"1": maxBytesPerShard}}
 	policy := newDataObjShardingPolicy(Config{}, limits)
 
 	t.Run("caps the shard count at 8 times the number of shard buckets when the chunk logic sets no cap", func(t *testing.T) {
@@ -132,7 +132,7 @@ func TestDataObjShardingPolicy_PowerOfTwoShards(t *testing.T) {
 		const smallBytes = 5 << 20
 		limits := bytesPerShardLimits{
 			tsdbBytesPerShard:    map[string]int{"1": maxBytesPerShard},
-			dataObjBytesPerShard: map[string]int{"1": maxBytesPerShard},
+			dataObjBytesPerShard: map[string]uint64{"1": maxBytesPerShard},
 		}
 		chunkPolicy := newChunkShardingPolicy(limits)
 		dataObjPolicy := newDataObjShardingPolicy(Config{}, limits)
@@ -149,7 +149,7 @@ func TestDataObjShardingPolicy_PowerOfTwoShards(t *testing.T) {
 		const smallBytes = 5 << 20
 		limits := bytesPerShardLimits{
 			tsdbBytesPerShard:    map[string]int{"1": 1 << 10},
-			dataObjBytesPerShard: map[string]int{"1": maxBytesPerShard},
+			dataObjBytesPerShard: map[string]uint64{"1": maxBytesPerShard},
 		}
 
 		got := newDataObjShardingPolicy(Config{}, limits).PowerOfTwoShards(tenants, stats.Stats{Bytes: smallBytes}, 0)
@@ -159,7 +159,7 @@ func TestDataObjShardingPolicy_PowerOfTwoShards(t *testing.T) {
 
 	t.Run("uses the smallest limit among the tenants", func(t *testing.T) {
 		const smallBytes = 5 << 20
-		limits := bytesPerShardLimits{dataObjBytesPerShard: map[string]int{"1": maxBytesPerShard, "2": 4 * maxBytesPerShard}}
+		limits := bytesPerShardLimits{dataObjBytesPerShard: map[string]uint64{"1": maxBytesPerShard, "2": 4 * maxBytesPerShard}}
 
 		got := newDataObjShardingPolicy(Config{}, limits).PowerOfTwoShards([]string{"2", "1"}, stats.Stats{Bytes: smallBytes}, 0)
 
@@ -326,7 +326,7 @@ func boundedShards(n int, bytes uint64) ([]logproto.Shard, []logproto.ChunkRefGr
 type bytesPerShardLimits struct {
 	fakeLimits
 	tsdbBytesPerShard    map[string]int
-	dataObjBytesPerShard map[string]int
+	dataObjBytesPerShard map[string]uint64
 }
 
 func (l bytesPerShardLimits) TSDBMaxBytesPerShard(tenantID string) int {
@@ -336,7 +336,7 @@ func (l bytesPerShardLimits) TSDBMaxBytesPerShard(tenantID string) int {
 	return l.fakeLimits.TSDBMaxBytesPerShard(tenantID)
 }
 
-func (l bytesPerShardLimits) DataObjMaxBytesPerShard(tenantID string) int {
+func (l bytesPerShardLimits) DataObjMaxBytesPerShard(tenantID string) uint64 {
 	if limit, ok := l.dataObjBytesPerShard[tenantID]; ok {
 		return limit
 	}
